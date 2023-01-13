@@ -411,7 +411,8 @@ if(SDL2_FOUND AND FFMPEG_FOUND)
   )
 endif()
 
-add_executable(bwvnc ${BWVNC_DIR}/bwvnc.c)
+add_executable(bwvnc ${BWVNC_DIR}/bwvnc.c
+                     ${BWVNC_DIR}/keysym2ucs.c)
 set_target_properties(bwvnc PROPERTIES OUTPUT_NAME bwvnc)
 set_target_properties(bwvnc PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(bwvnc vncclient ${CMAKE_THREAD_LIBS_INIT} ${SDL2_LIBRARY} ${FFMPEG_LIBRARIES})

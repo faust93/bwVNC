@@ -67,6 +67,8 @@
 
 #define MAX_TEXTCHAT_SIZE 10485760 /* 10MB */
 
+#define MAX_AUDIO_BYTES 32768
+
 /*
  * rfbClientLog prints a time-stamped message to the log file (stderr).
  */
@@ -181,6 +183,11 @@ static rfbBool HandleZRLE24Up(rfbClient* client, int rx, int ry, int rw, int rh)
 static rfbBool HandleZRLE24Down(rfbClient* client, int rx, int ry, int rw, int rh);
 static rfbBool HandleZRLE32(rfbClient* client, int rx, int ry, int rw, int rh);
 #endif
+
+static rfbBool HandleH264(rfbClient* client, int rx, int ry, int rw, int rh);
+static rfbBool audioInit(uint8_t fmt, uint8_t channels, uint32_t frequency);
+size_t addSamples(uint8_t* data, size_t size);
+void notifyStreamingStartStop(uint8_t isStart);
 
 /*
  * Server Capability Functions
@@ -1335,6 +1342,8 @@ SetFormatAndEncodings(rfbClient* client)
 	encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingCoRRE);
       } else if (strncasecmp(encStr,"rre",encStrLen) == 0) {
 	encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingRRE);
+      } else if (strncasecmp(encStr,"h264",encStrLen) == 0) {
+        encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingH264);
       } else {
 	rfbClientLog("Unknown encoding '%.*s'\n",encStrLen,encStr);
       }
@@ -1403,6 +1412,7 @@ SetFormatAndEncodings(rfbClient* client)
       encs[se->nEncodings++] = rfbClientSwap32IfLE(client->appData.qualityLevel +
 					  rfbEncodingQualityLevel0);
     }
+    encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingH264);
   }
 
 
@@ -1445,6 +1455,10 @@ SetFormatAndEncodings(rfbClient* client)
 
   if (se->nEncodings < MAX_ENCODINGS)
     encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingQemuExtendedKeyEvent);
+
+  /* audio */
+  if (se->nEncodings < MAX_ENCODINGS && client->audioEnable)
+    encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingQemuAudio);
 
   /* client extensions */
   for(e = rfbClientExtensions; e; e = e->next)
@@ -1787,7 +1801,33 @@ SendClientCutText(rfbClient* client, char *str, int len)
 	   WriteToRFBServer(client, str, len));
 }
 
+/* Qemu Audio stuff */
+rfbBool
+SendQemuAudioSetFormat(rfbClient* client, uint8_t fmt, uint8_t channels, uint32_t freq)
+{
+  rfbQemuAudioSetFormatMsg msg;
 
+  memset(&msg, 0, sizeof(msg));
+  msg.type = rfbQemuEvent;
+  msg.subtype = rfbQemuAudio;
+  msg.operation = rfbClientSwap16IfLE(2);
+  msg.sample_format = fmt;
+  msg.channels = channels;
+  msg.freq = rfbClientSwap16IfLE(freq);
+  return WriteToRFBServer(client, (char *)&msg, sz_rfbQemuAudioSetFormatMsg);
+}
+
+rfbBool
+SendQemuAudioOnOff(rfbClient* client, int enable)
+{
+  rfbQemuAudioClientMsg msg;
+
+  memset(&msg, 0, sizeof(msg));
+  msg.type = rfbQemuEvent;
+  msg.subtype = rfbQemuAudio;
+  msg.operation = rfbClientSwap16IfLE(enable); // 0 enable 1 disable
+  return WriteToRFBServer(client, (char *)&msg, sz_rfbQemuAudioClientMsg);
+}
 
 /*
  * HandleRFBServerMessage.
@@ -2200,7 +2240,12 @@ HandleRFBServerMessage(rfbClient* client)
         }
         break;
       }
-
+      case rfbEncodingH264:
+      {
+        if (!HandleH264(client, rect.r.x, rect.r.y, rect.r.w, rect.r.h))
+            return FALSE;
+        break;
+      }
 #ifdef LIBVNCSERVER_HAVE_LIBZ
       case rfbEncodingZlib:
       {
@@ -2285,9 +2330,15 @@ HandleRFBServerMessage(rfbClient* client)
      }
 
 #endif
-
       case rfbEncodingQemuExtendedKeyEvent:
         SetClient2Server(client, rfbQemuEvent);
+        break;
+
+      case rfbEncodingQemuAudio:
+        if(audioInit(client->sampleFormat, client->channels, client->frequency)) {
+          SetClient2Server(client, rfbQemuEvent);
+          client->awaitsQEMUAudioFormatMsg = TRUE;
+        }
         break;
 
       default:
@@ -2313,12 +2364,73 @@ HandleRFBServerMessage(rfbClient* client)
       client->GotFrameBufferUpdate(client, rect.r.x, rect.r.y, rect.r.w, rect.r.h);
     }
 
-    if (!SendIncrementalFramebufferUpdateRequest(client))
+    if (rect.encoding != rfbEncodingH264 && !SendIncrementalFramebufferUpdateRequest(client))
       return FALSE;
+
+    if(client->awaitsQEMUAudioFormatMsg) {
+        SendQemuAudioSetFormat(client, client->sampleFormat, client->channels, client->frequency);
+        SendQemuAudioOnOff(client, rfbQemuAudioEnable);
+        client->awaitsQEMUAudioFormatMsg = FALSE;
+    }
 
     if (client->FinishedFrameBufferUpdate)
       client->FinishedFrameBufferUpdate(client);
 
+    break;
+  }
+
+  case rfbQemuEvent:
+  {
+    uint8_t subType;
+    uint16_t operation;
+    uint32_t dataLength;
+
+    if (!ReadFromRFBServer(client, ((char *)&subType), sizeof(uint8_t)))
+      return FALSE;
+    if (!ReadFromRFBServer(client, ((char *)&operation), sizeof(uint16_t)))
+      return FALSE;
+
+    operation = rfbClientSwap16IfLE(operation);
+    if (subType != rfbQemuAudio) {
+      rfbClientLog("Unknown QEMU submessage type\n");
+      return FALSE;
+    }
+
+    switch(operation) {
+      case rfbQemuAudioBegin:
+        notifyStreamingStartStop(1);
+        return TRUE;
+
+      case rfbQemuAudioEnd:
+        notifyStreamingStartStop(0);
+        return TRUE;
+
+      case rfbQemuAudioData:
+        if (!ReadFromRFBServer(client, ((char *)&dataLength), sizeof(uint32_t)))
+          return FALSE;
+        dataLength = rfbClientSwap32IfLE(dataLength);
+        uint8_t aBuff[MAX_AUDIO_BYTES];
+        if(dataLength > MAX_AUDIO_BYTES) {
+            uint32_t chunk_l = MAX_AUDIO_BYTES;
+            while(dataLength) {
+                if (!ReadFromRFBServer(client, ((char *)&aBuff), chunk_l))
+                    return FALSE;
+                addSamples(aBuff, chunk_l);
+                dataLength -= chunk_l;
+                if(dataLength < MAX_AUDIO_BYTES)
+                  chunk_l = dataLength;
+            }
+        } else {
+            if (!ReadFromRFBServer(client, ((char *)&aBuff), dataLength))
+                return FALSE;
+            addSamples(aBuff, dataLength);
+        }
+        return TRUE;
+
+      default:
+        rfbClientLog("Invalid QEMU audio operation\n");
+        return FALSE;
+    }
     break;
   }
 
@@ -2547,7 +2659,8 @@ HandleRFBServerMessage(rfbClient* client)
 #define UNCOMP -8
 #include "zrle.c"
 #undef BPP
-
+#include "h264.c"
+#include "audio.c"
 
 /*
  * PrintPixelFormat.

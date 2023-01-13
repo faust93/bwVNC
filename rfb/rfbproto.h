@@ -437,8 +437,13 @@ typedef struct {
 #define rfbSetDesktopSize 251
 #define rfbQemuEvent 255
 
-
-
+#define rfbQemuAudio 1
+#define rfbQemuAudioEnable 0
+#define rfbQemuAudioDisable 1
+#define rfbQemuAudioBegin 1
+#define rfbQemuAudioEnd 0
+#define rfbQemuAudioSetFormat 2
+#define rfbQemuAudioData 2
 
 /*****************************************************************************
  *
@@ -460,7 +465,7 @@ typedef struct {
 #define rfbEncodingZRLE 16
 #define rfbEncodingZYWRLE 17
 
-#define rfbEncodingH264               0x48323634
+#define rfbEncodingH264 50
 
 /* Cache & XOR-Zlib - rdv@2002 */
 #define rfbEncodingCache                 0xFFFF0000
@@ -529,6 +534,7 @@ typedef struct {
 #define rfbEncodingQualityLevel9   0xFFFFFFE9
 
 #define rfbEncodingQemuExtendedKeyEvent 0xFFFFFEFE /* -258 */
+#define rfbEncodingQemuAudio 0xFFFFFEFD /* -259 */
 #define rfbEncodingExtendedClipboard 0xC0A1E5CE
 
 /* LibVNCServer additions.   We claim 0xFFFE0000 - 0xFFFE00FF */
@@ -1414,6 +1420,24 @@ typedef struct {
 
 #define sz_rfbQemuExtendedKeyEventMsg 12
 
+typedef struct {
+    uint8_t  type;     /* always rfbQemuEvent */
+    uint8_t  subtype;
+    uint16_t operation;
+    uint8_t  sample_format;
+    uint8_t  channels;
+    uint32_t freq;
+} rfbQemuAudioSetFormatMsg;
+
+#define sz_rfbQemuAudioSetFormatMsg 10
+
+typedef struct {
+    uint8_t type;     /* always rfbQemuEvent */
+    uint8_t subtype;
+    uint16_t operation;
+} rfbQemuAudioClientMsg;
+
+#define sz_rfbQemuAudioClientMsg 4
 
 /*-----------------------------------------------------------------------------
  * PointerEvent - mouse/pen move and/or button press.

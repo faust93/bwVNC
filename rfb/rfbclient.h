@@ -472,6 +472,13 @@ typedef struct _rfbClient {
 	 */
 	MUTEX(tlsRwMutex);
 
+    /* QEMU Audio */
+	rfbBool audioEnable;
+    uint8_t sampleFormat;
+    uint8_t channels;
+    uint32_t frequency;
+	rfbBool awaitsQEMUAudioFormatMsg;
+
 	rfbBool requestedResize;
         /**
          * Used for intended dimensions, rfbClient.width and rfbClient.height are used to manage the real framebuffer dimensions.
