@@ -21,11 +21,15 @@ struct { char mask; int bits_stored; } utf8Mapping[]= {
 	{0,0}
 };
 
-static int enableResizable = 1, viewOnly, listenLoop, buttonMask;
+#define RESIZE_DESKTOP 0
+#define RESIZE_ZOOM 1
+
+static int enableResizable = 1, resizeMethod = RESIZE_DESKTOP, viewOnly, listenLoop, buttonMask;
 int sdlFlags;
 SDL_Texture *sdlTexture;
 SDL_Renderer *sdlRenderer;
 SDL_Window *sdlWindow;
+
 /* client's pointer position */
 int x,y;
 int relmode = 0;
@@ -304,7 +308,8 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 					cl->width, cl->height, FALSE);
 		break;
 	    case SDL_WINDOWEVENT_RESIZED:
-	        SendExtDesktopSize(cl, e->window.data1, e->window.data2);
+			if(resizeMethod == RESIZE_DESKTOP)
+		        SendExtDesktopSize(cl, e->window.data1, e->window.data2);
 	        break;
 
 	    case SDL_WINDOWEVENT_FOCUS_GAINED:
@@ -332,8 +337,8 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 	    break;
 	case SDL_MOUSEWHEEL:
 	{
-	        int steps;
-	        if (viewOnly)
+	    int steps;
+	    if (viewOnly)
 			break;
 
 		if(e->wheel.y > 0)
@@ -392,7 +397,7 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 					break;
 				}
 		}
-                SendPointerEvent(cl, x, y, buttonMask);
+        SendPointerEvent(cl, x, y, buttonMask);
 		buttonMask &= ~(rfbButton4Mask | rfbButton5Mask);
 		break;
 	}
@@ -497,9 +502,13 @@ void renderBackendsSDL(void) {
 void usage(char *name) {
 	fprintf (stderr,"Usage: %s [options] [vnc options] server:port\n", name);
 	fprintf (stderr," Options:\n");
- 	fprintf (stderr,"  -showdrivers           Show available SDL rendering drivers\n");
+ 	fprintf (stderr,"  -showdrivers          Show available SDL rendering drivers\n");
   	fprintf (stderr,"  -sdldriver [s]        Use [s] SDL render driver (default: %s)\n", DEFAULT_RENDER_B);
 	fprintf (stderr,"  -noaudio              Disable audio support (default: enabled)\n");
+	fprintf (stderr,"  -resizable [s]        Enable window resizing (default: %s)\n", enableResizable ? "on" : "off");
+	fprintf (stderr,"  -resize-method [s]    Resizing method to use: zoom, desktop (default: desktop)\n");
+	fprintf (stderr,"                        'desktop' - change desktop resolution on the server side\n");
+	fprintf (stderr,"                        'zoom'    - rescale desktop picture to the client window size\n");
 	fprintf (stderr," VNC options:\n");
     fprintf (stderr,"  -encodings [s]         VNC encoding to use: h264 tight zrle ultra copyrect hextile zlib corre rre raw (default: h264)\n");
     exit(1);
@@ -527,11 +536,17 @@ int main(int argc,char** argv) {
 			viewOnly = 1;
 		else if (!strcmp(argv[i], "-noaudio"))
 			isAudioEnabled = FALSE;
-		else if (!strcmp(argv[i], "-resizable"))
-			enableResizable = 1;
-		else if (!strcmp(argv[i], "-no-resizable"))
-			enableResizable = 0;
-		else if (!strcmp(argv[i], "-listen")) {
+		else if (!strcmp(argv[i], "-resizable")) {
+			if(!strcasecmp(argv[i+1], "on"))
+				enableResizable = 1;
+			else if(!strcasecmp(argv[i+1], "off"))
+				enableResizable = 0;
+		} else if (!strcmp(argv[i], "-resize-method")) {
+			if(!strcasecmp(argv[i+1], "desktop"))
+				resizeMethod = RESIZE_DESKTOP;
+			else if(!strcasecmp(argv[i+1], "zoom"))
+				resizeMethod = RESIZE_ZOOM;
+		} else if (!strcmp(argv[i], "-listen")) {
 		        listenLoop = 1;
 				argv[i] = "-listennofork";
                 ++j;
