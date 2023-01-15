@@ -655,6 +655,8 @@ extern void PrintPixelFormat(rfbPixelFormat *format);
 extern rfbBool SupportsClient2Server(rfbClient* client, int messageType);
 extern rfbBool SupportsServer2Client(rfbClient* client, int messageType);
 
+extern rfbBool SendQemuAudioOnOff(rfbClient* client, int enable);
+
 /* client data */
 
 /**

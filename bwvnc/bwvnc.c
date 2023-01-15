@@ -2,43 +2,65 @@
 #include <signal.h>
 #include <rfb/rfbclient.h>
 #include "keysym2ucs.h"
+#include "bwvnc.h"
+#include "microui.h"
+#include "renderer.h"
 
-struct { int sdl; int rfb; } buttonMapping[]={
-	{1, rfbButton1Mask},
-	{2, rfbButton2Mask},
-	{3, rfbButton3Mask},
-	{4, rfbButton4Mask},
-	{5, rfbButton5Mask},
-	{0,0}
-};
+/* UI start */
+static void config_window(mu_Context *ctx)
+{
+	if (mu_begin_window_ex(ctx, "bwVNC", mu_rect((cl->width-300)/2, 0, 300, 240), MU_OPT_NOCLOSE)) {
+		//mu_Container *cnt = mu_get_current_container(ctx);
+		//cnt->rect.x = mouse_x;
+		//cnt->rect.y = mouse_y;
+		if (mu_header_ex(ctx, "Configuration", MU_OPT_EXPANDED)) {
+			mu_layout_row(ctx, 1, (int[]) { -1 }, 0);
+			mu_checkbox(ctx, "Relative mouse mode", &mouse_relmode);
+			if(mu_checkbox(ctx, "Audio enabled", &isAudioEnabled)){
+				cl->audioEnable = isAudioEnabled;
+				SendQemuAudioOnOff(cl, isAudioEnabled ? 0 : 1);
+			}
+			mu_checkbox(ctx, "Zoom resize mode", &resizeMethod);
+		}
 
-struct { char mask; int bits_stored; } utf8Mapping[]= {
-	{0b00111111, 6},
-	{0b01111111, 7},
-	{0b00011111, 5},
-	{0b00001111, 4},
-	{0b00000111, 3},
-	{0,0}
-};
+		if (mu_header(ctx, "Log")) {
+			/* output text panel */
+			mu_layout_row(ctx, 1, (int[]) { -1 }, 300);
+			mu_begin_panel(ctx, "Log Output");
+			mu_Container *panel = mu_get_current_container(ctx);
+			mu_layout_row(ctx, 1, (int[]) { -1 }, -1);
+			mu_text(ctx, logbuf);
+			if (logbuf_updated) {
+				panel->scroll.y = panel->content_size.y;
+				logbuf_updated = FALSE;
+			}
+			mu_end_panel(ctx);
+		}
+	mu_end_window(ctx);
+	}
+}
 
-#define RESIZE_DESKTOP 0
-#define RESIZE_ZOOM 1
+static void ui_process_frame(mu_Context *ctx) {
+	mu_begin(ctx);
+	config_window(ctx);
+	mu_end(ctx);
+}
 
-static int enableResizable = 1, resizeMethod = RESIZE_DESKTOP, viewOnly, listenLoop, buttonMask;
-int sdlFlags;
-SDL_Texture *sdlTexture;
-SDL_Renderer *sdlRenderer;
-SDL_Window *sdlWindow;
-
-/* client's pointer position */
-int x,y;
-int relmode = 0;
-
-char *SDLrenderDriver = NULL;
-int isAudioEnabled = TRUE;
-
-static rfbKeySym psym;
-static int rightAltKeyDown, leftAltKeyDown;
+void ui_ev_callback(mu_Context *ctx, SDL_Event *e){
+	switch(e->type) {
+		case SDL_KEYUP:
+		case SDL_KEYDOWN:
+		if(e->key.keysym.sym == SDLK_F12 && e->type == SDL_KEYDOWN) {
+			if(ui_show) {
+				if(mouse_relmode)
+					SDL_SetRelativeMouseMode(SDL_TRUE);
+				ui_show = FALSE;
+			}
+			break;
+		}
+	}
+}
+/* UI end */
 
 static rfbBool resize(rfbClient* client) {
 	int width=client->width,height=client->height,
@@ -105,6 +127,11 @@ static rfbBool resize(rfbClient* client) {
 				       width, height);
 	if(!sdlTexture)
 	    rfbClientErr("resize: error creating texture: %s\n", SDL_GetError());
+
+	if(sdlRenderer && sdlWindow && !ui_inited) {
+		ui_inited = TRUE;
+		r_init(sdlWindow, sdlRenderer);
+	}
 	return TRUE;
 }
 
@@ -209,12 +236,19 @@ static void update(rfbClient* cl,int x,int y,int w,int h) {
 	/* update texture from surface->pixels */
 	SDL_Rect r = {x,y,w,h};
  	if(SDL_UpdateTexture(sdlTexture, &r, sdl->pixels + y*sdl->pitch + x*4, sdl->pitch) < 0)
-	    rfbClientErr("update: failed to update texture: %s\n", SDL_GetError());
+		rfbClientErr("update: failed to update texture: %s\n", SDL_GetError());
 	/* copy texture to renderer and show */
 	if(SDL_RenderClear(sdlRenderer) < 0)
-	    rfbClientErr("update: failed to clear renderer: %s\n", SDL_GetError());
+		rfbClientErr("update: failed to clear renderer: %s\n", SDL_GetError());
 	if(SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL) < 0)
-	    rfbClientErr("update: failed to copy texture to renderer: %s\n", SDL_GetError());
+		rfbClientErr("update: failed to copy texture to renderer: %s\n", SDL_GetError());
+
+	/* UI show window */
+	if(ui_show){
+		ui_process_frame(ctx);
+		r_ui_draw(ctx);
+	}
+
 	SDL_RenderPresent(sdlRenderer);
 }
 
@@ -244,46 +278,36 @@ static void text_chat(rfbClient* cl, int value, char *text) {
 	fflush(stderr);
 }
 
-#ifdef __MINGW32__
-#define LOG_TO_FILE
-#endif
+void write_log(char *text) {
+	if ((strlen(logbuf) + strlen(text) + 1) >= LOG_SIZE) {
+		memcpy(logbuf, logbuf+LOG_SIZE/2, LOG_SIZE/2);
+	}
+	strcat(logbuf, text);
+	logbuf_updated = TRUE;
+}
 
-#ifdef LOG_TO_FILE
-#include <stdarg.h>
-static void
-log_to_file(const char *format, ...)
+static void LogWriter(const char *format, ...)
 {
-    FILE* logfile;
-    static char* logfile_str=0;
     va_list args;
-    char buf[256];
+    char buf[1024];
     time_t log_clock;
 
     if(!rfbEnableClientLogging)
       return;
 
-    if(logfile_str==0) {
-	logfile_str=getenv("VNCLOG");
-	if(logfile_str==0)
-	    logfile_str="vnc.log";
-    }
-
-    logfile=fopen(logfile_str,"a");
-
     va_start(args, format);
 
     time(&log_clock);
     strftime(buf, 255, "%d/%m/%Y %X ", localtime(&log_clock));
-    fprintf(logfile,buf);
-
-    vfprintf(logfile, format, args);
-    fflush(logfile);
+	write_log(buf);
+    fprintf(stderr, "%s", buf);
+	vsprintf(buf, format, args);
+	write_log(buf);
+    fprintf(stderr, "%s", buf);
+    fflush(stderr);
 
     va_end(args);
-    fclose(logfile);
 }
-#endif
-
 
 static void cleanup(rfbClient* cl)
 {
@@ -302,65 +326,62 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 {
 	switch(e->type) {
 	case SDL_WINDOWEVENT:
-	    switch (e->window.event) {
-	    case SDL_WINDOWEVENT_EXPOSED:
-		SendFramebufferUpdateRequest(cl, 0, 0,
-					cl->width, cl->height, FALSE);
-		break;
-	    case SDL_WINDOWEVENT_RESIZED:
-			if(resizeMethod == RESIZE_DESKTOP)
-		        SendExtDesktopSize(cl, e->window.data1, e->window.data2);
-	        break;
-
-	    case SDL_WINDOWEVENT_FOCUS_GAINED:
-            if (SDL_HasClipboardText()) {
-		        char *text = SDL_GetClipboardText();
-		    	if(text) {
-			       SendClientCutText(cl, text, strlen(text));
-			    }
-		    }
-			break;
-
-	    case SDL_WINDOWEVENT_FOCUS_LOST:
-		if (rightAltKeyDown) {
-			SendKeyEvent(cl, XK_Alt_R, FALSE);
-			rightAltKeyDown = FALSE;
-			rfbClientLog("released right Alt key\n");
+		switch (e->window.event) {
+			case SDL_WINDOWEVENT_EXPOSED:
+				SendFramebufferUpdateRequest(cl, 0, 0, cl->width, cl->height, FALSE);
+				break;
+			case SDL_WINDOWEVENT_RESIZED:
+				if(resizeMethod == RESIZE_DESKTOP)
+					SendExtDesktopSize(cl, e->window.data1, e->window.data2);
+				break;
+			case SDL_WINDOWEVENT_FOCUS_GAINED:
+				if (SDL_HasClipboardText()) {
+					char *text = SDL_GetClipboardText();
+					if(text) {
+						SendClientCutText(cl, text, strlen(text));
+					}
+				}
+				break;
+			case SDL_WINDOWEVENT_FOCUS_LOST:
+				if (rightAltKeyDown) {
+					SendKeyEvent(cl, XK_Alt_R, FALSE);
+					rightAltKeyDown = FALSE;
+					rfbClientLog("released right Alt key\n");
+				}
+				if (leftAltKeyDown) {
+					SendKeyEvent(cl, XK_Alt_L, FALSE);
+					leftAltKeyDown = FALSE;
+					rfbClientLog("released left Alt key\n");
+				}
+				break;
 		}
-		if (leftAltKeyDown) {
-			SendKeyEvent(cl, XK_Alt_L, FALSE);
-			leftAltKeyDown = FALSE;
-			rfbClientLog("released left Alt key\n");
-		}
 		break;
-	    }
-	    break;
 	case SDL_MOUSEWHEEL:
 	{
-	    int steps;
-	    if (viewOnly)
+		int steps;
+		if (viewOnly)
 			break;
 
 		if(e->wheel.y > 0)
-		    for(steps = 0; steps < e->wheel.y; ++steps) {
-			SendPointerEvent(cl, x, y, rfbButton4Mask);
-			SendPointerEvent(cl, x, y, 0);
-		    }
+			for(steps = 0; steps < e->wheel.y; ++steps) {
+			SendPointerEvent(cl, mouse_x, mouse_y, rfbButton4Mask);
+			SendPointerEvent(cl, mouse_x, mouse_y, 0);
+			}
 		if(e->wheel.y < 0)
-		    for(steps = 0; steps > e->wheel.y; --steps) {
-			SendPointerEvent(cl, x, y, rfbButton5Mask);
-			SendPointerEvent(cl, x, y, 0);
-		    }
+			for(steps = 0; steps > e->wheel.y; --steps) {
+			SendPointerEvent(cl, mouse_x, mouse_y, rfbButton5Mask);
+			SendPointerEvent(cl, mouse_x, mouse_y, 0);
+			}
 		if(e->wheel.x > 0)
-		    for(steps = 0; steps < e->wheel.x; ++steps) {
-			SendPointerEvent(cl, x, y, 0b01000000);
-			SendPointerEvent(cl, x, y, 0);
-		    }
+			for(steps = 0; steps < e->wheel.x; ++steps) {
+			SendPointerEvent(cl, mouse_x, mouse_y, 0b01000000);
+			SendPointerEvent(cl, mouse_x, mouse_y, 0);
+			}
 		if(e->wheel.x < 0)
-		    for(steps = 0; steps > e->wheel.x; --steps) {
-			SendPointerEvent(cl, x, y, 0b00100000);
-			SendPointerEvent(cl, x, y, 0);
-		    }
+			for(steps = 0; steps > e->wheel.x; --steps) {
+			SendPointerEvent(cl, mouse_x, mouse_y, 0b00100000);
+			SendPointerEvent(cl, mouse_x, mouse_y, 0);
+			}
 		break;
 	}
 	case SDL_MOUSEBUTTONUP:
@@ -372,19 +393,19 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 			break;
 
 		if (e->type == SDL_MOUSEMOTION) {
-			if(relmode){
-				x = 0x7FFF + e->motion.xrel;
-				y = 0x7FFF + e->motion.yrel;
+			if(mouse_relmode){
+				mouse_x = 0x7FFF + e->motion.xrel;
+				mouse_y = 0x7FFF + e->motion.yrel;
 			} else {
-				x = e->motion.x;
-				y = e->motion.y;
+				mouse_x = e->motion.x;
+				mouse_y = e->motion.y;
 			}
 			state = e->motion.state;
 		}
 		else {
-			if(!relmode) {
-				x = e->button.x;
-				y = e->button.y;
+			if(!mouse_relmode) {
+				mouse_x = e->button.x;
+				mouse_y = e->button.y;
 			}
 			state = e->button.button;
 			for (i = 0; buttonMapping[i].sdl; i++)
@@ -397,7 +418,7 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 					break;
 				}
 		}
-        SendPointerEvent(cl, x, y, buttonMask);
+		SendPointerEvent(cl, mouse_x, mouse_y, buttonMask);
 		buttonMask &= ~(rfbButton4Mask | rfbButton5Mask);
 		break;
 	}
@@ -406,17 +427,11 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 		if (viewOnly)
 			break;
 		if(e->key.keysym.sym == SDLK_F12 && e->type == SDL_KEYDOWN) {
-			if(relmode) {
-				relmode = 0;
-				SDL_SetRelativeMouseMode(SDL_FALSE);
-			} else {
-				relmode = 1;
-				SDL_SetRelativeMouseMode(SDL_TRUE);
-				x = cl->width/2;
-				y = cl->height/2;
-				SendPointerEvent(cl, x, y, 0);
+			if(!ui_show) {
+				ui_show = TRUE;
+				if(mouse_relmode)
+					SDL_SetRelativeMouseMode(SDL_FALSE);
 			}
-			rfbClientLog("Relative mouse mode: %s\n", relmode ? "ON" : "OFF");
 			break;
 		}
 		SendKeyEvent(cl, SDL_key2rfbKeySym(&e->key), e->type == SDL_KEYDOWN ? TRUE : FALSE);
@@ -497,31 +512,26 @@ void renderBackendsSDL(void) {
 #define main SDLmain
 #endif
 
-#define DEFAULT_RENDER_B "opengl"
-
 void usage(char *name) {
 	fprintf (stderr,"Usage: %s [options] [vnc options] server:port\n", name);
 	fprintf (stderr," Options:\n");
  	fprintf (stderr,"  -showdrivers          Show available SDL rendering drivers\n");
   	fprintf (stderr,"  -sdldriver [s]        Use [s] SDL render driver (default: %s)\n", DEFAULT_RENDER_B);
 	fprintf (stderr,"  -noaudio              Disable audio support (default: enabled)\n");
-	fprintf (stderr,"  -resizable [s]        Enable window resizing (default: %s)\n", enableResizable ? "on" : "off");
+	fprintf (stderr,"  -resizable [s]        Enable desktop window resizing (default: %s)\n", enableResizable ? "on" : "off");
 	fprintf (stderr,"  -resize-method [s]    Resizing method to use: zoom, desktop (default: desktop)\n");
 	fprintf (stderr,"                        'desktop' - change desktop resolution on the server side\n");
 	fprintf (stderr,"                        'zoom'    - rescale desktop picture to the client window size\n");
+ 	fprintf (stderr,"  -no-logs              Disable logging (default: %s)\n", logging_enabled ? "on" : "off");
 	fprintf (stderr," VNC options:\n");
     fprintf (stderr,"  -encodings [s]         VNC encoding to use: h264 tight zrle ultra copyrect hextile zlib corre rre raw (default: h264)\n");
     exit(1);
 }
 
+
 int main(int argc,char** argv) {
-	rfbClient* cl;
 	int i, j;
 	SDL_Event e;
-
-#ifdef LOG_TO_FILE
-	rfbClientLog=rfbClientErr=log_to_file;
-#endif
 
 	if(argc < 2)
 		usage(argv[0]);
@@ -536,6 +546,8 @@ int main(int argc,char** argv) {
 			viewOnly = 1;
 		else if (!strcmp(argv[i], "-noaudio"))
 			isAudioEnabled = FALSE;
+		else if (!strcmp(argv[i], "-no-logs"))
+			logging_enabled = FALSE;
 		else if (!strcmp(argv[i], "-resizable")) {
 			if(!strcasecmp(argv[i+1], "on"))
 				enableResizable = 1;
@@ -547,9 +559,9 @@ int main(int argc,char** argv) {
 			else if(!strcasecmp(argv[i+1], "zoom"))
 				resizeMethod = RESIZE_ZOOM;
 		} else if (!strcmp(argv[i], "-listen")) {
-		        listenLoop = 1;
+				listenLoop = 1;
 				argv[i] = "-listennofork";
-                ++j;
+				++j;
 		}
 		else {
 			if (i != j)
@@ -567,6 +579,21 @@ int main(int argc,char** argv) {
 
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, SDLrenderDriver ? SDLrenderDriver : DEFAULT_RENDER_B);
 	rfbClientLog("SDL Rendering Driver: %s\n", SDLrenderDriver ? SDLrenderDriver : DEFAULT_RENDER_B);
+	SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
+
+	/* UI init */
+  	ctx = malloc(sizeof(mu_Context));
+  	mu_init(ctx);
+  	ctx->text_width = r_get_text_width;
+  	ctx->text_height = r_get_text_height;
+	//ctx->draw_frame  = r_draw_frame;
+    ctx->style->spacing = 6;
+    ctx->style->padding = 4;
+    ctx->style->colors[MU_COLOR_PANELBG] = mu_color(50,  50,  50,  155);
+	r_ui_event_callback = ui_ev_callback;
+
+	rfbClientLog=rfbClientErr=LogWriter;
+	rfbEnableClientLogging = logging_enabled;
 
 	do {
 	  /* 16-bit: cl=rfbGetClient(5,3,2); */
@@ -586,6 +613,8 @@ int main(int argc,char** argv) {
 	  cl->channels = 2;
 	  cl->frequency = 22050;
 
+	  SDL_GL_SetSwapInterval(-1);
+
 	  if(!rfbInitClient(cl,&argc,argv))
 	    {
 	      cl = NULL; /* rfbInitClient has already freed the client struct */
@@ -595,27 +624,28 @@ int main(int argc,char** argv) {
 
 	  while(1) {
 	    if(SDL_PollEvent(&e)) {
-	      /*
-		handleSDLEvent() return 0 if user requested window close.
-		In this case, handleSDLEvent() will have called cleanup().
-	      */
-	      if(!handleSDLEvent(cl, &e))
-		break;
-//            SDL_Delay(5);
-	    }
-	    else {
-	      i=WaitForMessage(cl,500);
-	      if(i<0)
-		{
-		  cleanup(cl);
-		  break;
-		}
-	      if(i)
-		if(!HandleRFBServerMessage(cl))
-		  {
-		    cleanup(cl);
-		    break;
-		  }
+			if(ui_show) {
+				if(!r_ui_event(ctx, &e))
+					break;
+			} else if(!handleSDLEvent(cl, &e))
+					break;
+	    } else {
+			i=WaitForMessage(cl,500);
+			if(i<0)
+			{
+		  		cleanup(cl);
+		  		break;
+		  	}
+			if(i)
+			if(!HandleRFBServerMessage(cl))
+		  	{
+		    	cleanup(cl);
+		    	break;
+		  	}
+			if(ui_show) {
+				update(cl,0,0,cl->width,cl->height);
+				SDL_Delay(4);
+			}
 	    }
 	  }
 	}
