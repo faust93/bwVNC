@@ -186,7 +186,7 @@ static rfbBool HandleZRLE32(rfbClient* client, int rx, int ry, int rw, int rh);
 
 static rfbBool HandleH264(rfbClient* client, int rx, int ry, int rw, int rh);
 static rfbBool audioInit(uint8_t fmt, uint8_t channels, uint32_t frequency);
-size_t addSamples(uint8_t* data, size_t size);
+size_t addSamples(rfbClient* client, uint8_t* data, size_t size);
 void notifyStreamingStartStop(uint8_t isStart);
 
 /*
@@ -2415,7 +2415,7 @@ HandleRFBServerMessage(rfbClient* client)
             while(dataLength) {
                 if (!ReadFromRFBServer(client, ((char *)&aBuff), chunk_l))
                     return FALSE;
-                addSamples(aBuff, chunk_l);
+                addSamples(client, aBuff, chunk_l);
                 dataLength -= chunk_l;
                 if(dataLength < MAX_AUDIO_BYTES)
                   chunk_l = dataLength;
@@ -2423,7 +2423,7 @@ HandleRFBServerMessage(rfbClient* client)
         } else {
             if (!ReadFromRFBServer(client, ((char *)&aBuff), dataLength))
                 return FALSE;
-            addSamples(aBuff, dataLength);
+            addSamples(client, aBuff, dataLength);
         }
         return TRUE;
 

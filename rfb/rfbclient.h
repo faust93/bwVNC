@@ -238,6 +238,15 @@ typedef char* (*GetUserProc)(struct _rfbClient* client);
 typedef char* (*GetSASLMechanismProc)(struct _rfbClient* client, char* mechlist);
 #endif /* LIBVNCSERVER_HAVE_SASL */
 
+/* client side stats */
+typedef struct rfbClientStats {
+    uint32_t audioBytesRx;
+	uint32_t audioPendingBytes; /* bytes pending to be sent to audio hw */
+	uint32_t audioPendingMs;
+    uint32_t h264BytesRx;
+	uint32_t h264FramesRx;
+} rfbClientStats;
+
 typedef struct _rfbClient {
 	uint8_t* frameBuffer;
 	int width, height;
@@ -472,11 +481,11 @@ typedef struct _rfbClient {
 	 */
 	MUTEX(tlsRwMutex);
 
-    /* QEMU Audio */
+	/* QEMU Audio */
 	rfbBool audioEnable;
-    uint8_t sampleFormat;
-    uint8_t channels;
-    uint32_t frequency;
+	uint8_t sampleFormat;
+	uint8_t channels;
+	uint32_t frequency;
 	rfbBool awaitsQEMUAudioFormatMsg;
 
 	rfbBool requestedResize;
@@ -484,6 +493,8 @@ typedef struct _rfbClient {
          * Used for intended dimensions, rfbClient.width and rfbClient.height are used to manage the real framebuffer dimensions.
 	 */
 	rfbExtDesktopScreen screen;
+    /* client side stats */
+	rfbClientStats clientStats;
 } rfbClient;
 
 /* cursor.c */

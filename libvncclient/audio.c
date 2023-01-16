@@ -156,7 +156,7 @@ void addSilentSamples(size_t numberOfSamples)
   }
 }
 
-size_t addSamples(uint8_t* data, size_t size)
+size_t addSamples(rfbClient* client, uint8_t* data, size_t size)
 {
   while(cbLock)
     usleep(5);
@@ -186,6 +186,9 @@ size_t addSamples(uint8_t* data, size_t size)
       data               += bytes_to_copy;
       bytes_left_to_copy -= bytes_to_copy;
     }
+    client->clientStats.audioBytesRx += size;
+    client->clientStats.audioPendingBytes = bufUnsubmittedSize;
+    client->clientStats.audioPendingMs = ((bufUnsubmittedSize / GetSampleSize) / CALLBACK_PERIOD_SZ);
   }
   return size;
 }

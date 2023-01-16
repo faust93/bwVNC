@@ -7,6 +7,21 @@
 #include "renderer.h"
 
 /* UI start */
+char *humanSize(uint64_t bytes, char *hrbytes)
+{
+    char   *suffix[] = { "B", "KB", "MB", "GB", "TB" };
+    char    length = sizeof(suffix) / sizeof(suffix[0]);
+    int     i;
+	double dblBytes = bytes;
+
+	if (bytes > 1024) {
+		for (i = 0; (bytes / 1024) > 0 && i<length-1; i++, bytes /= 1024)
+			dblBytes = bytes / 1024.0;
+	}
+    snprintf(hrbytes, BUFSIZ, "%.02lf %s", dblBytes, suffix[i]);
+    return(hrbytes);
+}
+
 static void config_window(mu_Context *ctx)
 {
 	if (mu_begin_window_ex(ctx, "bwVNC", mu_rect((cl->width-300)/2, 0, 300, 240), MU_OPT_NOCLOSE)) {
@@ -22,7 +37,25 @@ static void config_window(mu_Context *ctx)
 			}
 			mu_checkbox(ctx, "Zoom resize mode", &resizeMethod);
 		}
-
+		if (mu_header(ctx, "Connection Info")) {
+			char buf[BUFSIZ];
+			if (mu_begin_treenode(ctx, "Client stats")) {
+				mu_layout_row(ctx, 2, (int[]) { 118, -1 }, 0);
+				mu_label(ctx, "Audio bytes received");
+				mu_label(ctx, humanSize(cl->clientStats.audioBytesRx, buf));
+				mu_label(ctx, "Audio pending buffer");
+				mu_label(ctx, humanSize(cl->clientStats.audioPendingBytes, buf));
+				mu_label(ctx, "Audio pending ms");
+				sprintf(buf,"%d ms",cl->clientStats.audioPendingMs);
+				mu_label(ctx, buf);
+				mu_label(ctx, "h264 bytes received");
+				mu_label(ctx, humanSize(cl->clientStats.h264BytesRx, buf));
+				mu_label(ctx, "h264 frames received");
+				sprintf(buf,"%d",cl->clientStats.h264FramesRx);
+				mu_label(ctx, buf);
+				mu_end_treenode(ctx);
+			}
+		}
 		if (mu_header(ctx, "Log")) {
 			/* output text panel */
 			mu_layout_row(ctx, 1, (int[]) { -1 }, 300);

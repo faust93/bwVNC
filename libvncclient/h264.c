@@ -161,6 +161,8 @@ void H264Decode(rfbClient* client, uint8_t* h264_in_buffer, uint32_t len, uint32
   if (!frames_received)
     return;
 
+  client->clientStats.h264FramesRx += frames_received;
+  
   if (!frame->height)
     return;
 
@@ -218,6 +220,8 @@ static rfbBool HandleH264(rfbClient* client, int rx, int ry, int rw, int rh)
         return false;
 
     H264Decode(client, (uint8_t *)framedata, hdr.nBytes, 0);
+
+    client->clientStats.h264BytesRx += hdr.nBytes;
 
     free(framedata);
 
