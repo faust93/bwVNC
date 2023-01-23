@@ -47,11 +47,16 @@ option(WITH_GNUTLS "Search for the GnuTLS secure communications library to suppo
 option(WITH_OPENSSL "Search for the OpenSSL cryptography library to support TLS and use as crypto backend" ON)
 option(WITH_GCRYPT "Search for Libgcrypt to use as crypto backend" ON)
 option(WITH_FFMPEG "Search for FFMPEG to build an example VNC to MPEG encoder" ON)
+option(WITH_OPUS "Search for Libopus to support Opus encoded audio" ON)
 option(WITH_IPv6 "Enable IPv6 Support" ON)
 option(WITH_SASL "Build with SASL support" ON)
 
 set(COMPILE_FLAGS "-O3")
 add_definitions(${COMPILE_FLAGS})
+
+if(WITH_OPUS)
+  find_package(OPUS)
+endif(WITH_OPUS)
 
 if(WITH_ZLIB)
   find_package(ZLIB)
@@ -398,6 +403,7 @@ target_link_libraries(vncclient
                       ${GNUTLS_LIBRARIES}
                       ${OPENSSL_LIBRARIES}
                       ${FFMPEG_LIBRARIES}
+                      ${OPUS_LIBRARIES}
 )
 
 SET_TARGET_PROPERTIES(vncclient

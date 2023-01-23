@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <opus/opus.h>
 
 //#define MA_DEBUG_OUTPUT
 #define MA_NO_WEBAUDIO
@@ -19,18 +20,18 @@
 50ms callback = 1102 frames and 4408 bytes buffer size per callback iteration
 frames count * byter per frame (4) = 4408 bytes
 */
-#define CALLBACK_PERIOD_SZ 20 /* msec */
+#define CALLBACK_PERIOD_SZ 25 /* msec */
 
 size_t maxNetworkJitterInMillisec = 1000;
 
-uint8_t sampleFormatU8  = 0;
-uint8_t sampleFormatS8  = 1;
-uint8_t sampleFormatU16 = 2;
-uint8_t sampleFormatS16 = 3;
-uint8_t sampleFormatU32 = 4;
-uint8_t sampleFormatS32 = 5;
+const uint8_t sampleFormatU8  = 0;
+const uint8_t sampleFormatS8  = 1;
+const uint8_t sampleFormatU16 = 2;
+const uint8_t sampleFormatS16 = 3;
+const uint8_t sampleFormatU32 = 4;
+const uint8_t sampleFormatS32 = 5;
 
-uint8_t bitsPerSample[6] = {8, 8, 16, 16, 32, 32};
+uint8_t bitsPerSample[] = {8, 8, 16, 16, 32, 32};
 
 ma_device      aDev;
 uint8_t        sampleFormat, numberOfChannels;
@@ -43,6 +44,14 @@ size_t         bufUnsubmittedSize;
 size_t         bufSubmittedHead;
 size_t         bufUnsubmittedHead;
 uint32_t       extraDelayInMillisec;
+
+/* opus stuff */
+#define OPUS_FMT 8
+#define OPUS_MAX_FRAME_SIZE 480
+
+OpusDecoder    *opusDecoder = NULL;
+uint8_t        opusEnabled = FALSE;
+opus_int16     *opusDecodedBuf = NULL;
 
 bool           audioEngineState,cbLock = false;
 
@@ -87,11 +96,14 @@ cb_exit:
 
 static rfbBool audioInit(uint8_t fmt, uint8_t channels, uint32_t frequency)
 {
-  uint8_t  bits_per_sample = bitsPerSample[fmt];
+  uint8_t  bits_per_sample = bitsPerSample[fmt & (OPUS_FMT-1)];
 
   sampleFormat     = ((bits_per_sample == 8) ? sampleFormatU8 : sampleFormatS16);
   numberOfChannels = channels;
   samplingFreq     = frequency;
+
+  if(fmt & OPUS_FMT)
+    opusEnabled = TRUE;
 
   if (audioEngineState)
      return false;
@@ -156,18 +168,51 @@ void addSilentSamples(size_t numberOfSamples)
   }
 }
 
+size_t opusDecodeFrame(uint8_t* data, size_t size)
+{
+  int err;
+  if(opusDecoder == NULL){
+    opusDecoder = opus_decoder_create(48000, numberOfChannels, &err);
+    if (err<0) {
+      rfbClientLog("%s: failed to create Opus decoder: %s\n", __FUNCTION__, opus_strerror(err));
+      return false;
+    }
+    opusDecodedBuf = malloc(OPUS_MAX_FRAME_SIZE * GetSampleSize);
+    if(opusDecodedBuf == NULL) {
+      rfbClientLog("%s: failed to allocate opus buffer\n", __FUNCTION__);
+      return false;
+    }
+  }
+  err = opus_decode(opusDecoder, data, size, opusDecodedBuf, OPUS_MAX_FRAME_SIZE, 0);
+  if(err < 0) {
+    rfbClientLog("%s: failed to decode Opus frame: %s\n", __FUNCTION__, opus_strerror(err));
+    err = 0;
+  }
+  return err * GetSampleSize;
+}
+
 size_t addSamples(rfbClient* client, uint8_t* data, size_t size)
 {
   while(cbLock)
     usleep(5);
 
-  /* skip sample in case of delay > CALLBACK_PERIOD_SZ * 5 */
-  if (bufUnsubmittedSize > fbytes * 5) {
-    size = size / 2;
-    rfbClientLog("%s: audio frame skiped, chunk size trimmed to %d bufUnsubmittedSize=%d framebytes=%d\n",__FUNCTION__, size, bufUnsubmittedSize, fbytes);
-  }
-  
   if (audioEngineState && size > 0) {
+    client->clientStats.audioBytesRx += size;
+
+    uint8_t* pcm_data = data;
+    if(opusEnabled) {
+      size = opusDecodeFrame(data, size);
+      if(size == 0)
+        return size;
+      pcm_data = (uint8_t *)opusDecodedBuf;
+    }
+
+    /* skip sample in case of delay > CALLBACK_PERIOD_SZ * 5 */
+    if (bufUnsubmittedSize > fbytes * 5) {
+      size = size / 2;
+      rfbClientLog("%s: audio frame skiped, chunk size trimmed to %d bufUnsubmittedSize=%d framebytes=%d\n",__FUNCTION__, size, bufUnsubmittedSize, fbytes);
+    }
+
     size_t bytes_left_to_copy = size;
     while (bytes_left_to_copy != 0) {
       size_t bytes_to_copy = bytes_left_to_copy;
@@ -179,14 +224,14 @@ size_t addSamples(rfbClient* client, uint8_t* data, size_t size)
       if (bytes_to_copy == 0)
         break;
 
-      memcpy(bufPtr + bufUnsubmittedHead, data, bytes_to_copy);
+      memcpy(bufPtr + bufUnsubmittedHead, pcm_data, bytes_to_copy);
       bufUnsubmittedHead  = ((bufUnsubmittedHead + bytes_to_copy) & (bufTotalSize - 1));
       bufFreeSize        -= bytes_to_copy;
       bufUnsubmittedSize += bytes_to_copy;
-      data               += bytes_to_copy;
+      pcm_data           += bytes_to_copy;
       bytes_left_to_copy -= bytes_to_copy;
     }
-    client->clientStats.audioBytesRx += size;
+
     client->clientStats.audioPendingBytes = bufUnsubmittedSize;
     client->clientStats.audioPendingMs = ((bufUnsubmittedSize / GetSampleSize) / CALLBACK_PERIOD_SZ);
   }
@@ -195,11 +240,15 @@ size_t addSamples(rfbClient* client, uint8_t* data, size_t size)
 
 void notifyStreamingStartStop(uint8_t isStart)
 {
+  size_t sample_size = GetSampleSize;
+  size_t buf_estim_size = (sample_size * maxNetworkJitterInMillisec * samplingFreq) / 1000;
+  size_t buf_alloc_size = 1;
+  while (buf_alloc_size < buf_estim_size)
+    buf_alloc_size <<= 1;
+  bufTotalSize = bufFreeSize = buf_alloc_size * sample_size;
+  bufUnsubmittedSize = bufSubmittedHead = bufUnsubmittedHead = 0;
   if (isStart) {
-    // suppress audio stuttering caused by network jitter:
-    // add 20+ milliseconds of silence (playback delay) ahead of actual samples
-    size_t delay_in_millisec = 20 + extraDelayInMillisec;
-    addSilentSamples(delay_in_millisec * samplingFreq / 1000);
+    addSilentSamples(20 * samplingFreq / 1000);
   }
 }
 
@@ -208,6 +257,11 @@ void audioStop(void)
   if (audioEngineState) {
     audioEngineState = false;
     ma_device_uninit(&aDev);
+    if(opusDecoder) {
+      opus_decoder_destroy(opusDecoder);
+      free(opusDecodedBuf);
+      opusDecoder = NULL;
+    }
     free(bufPtr);
   }
 }

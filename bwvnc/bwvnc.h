@@ -26,9 +26,10 @@ SDL_Renderer *sdlRenderer;
 SDL_Window *sdlWindow;
 char *SDLrenderDriver = NULL;
 
-/* client's pointer position & relative mode toggle */
+/* client's pointer position & game mode toggle */
 int mouse_x, mouse_y;
-int mouse_relmode = FALSE;
+/* switch to relative mouse mode & restricted keyboard input (textmode disabled) */
+int game_relmode = FALSE;
 
 int isAudioEnabled = TRUE;
 
@@ -54,3 +55,30 @@ struct { char mask; int bits_stored; } utf8Mapping[]= {
 	{0b00000111, 3},
 	{0,0}
 };
+
+const uint8_t sampleFormatU8  = 0;
+const uint8_t sampleFormatS8  = 1;
+const uint8_t sampleFormatU16 = 2;
+const uint8_t sampleFormatS16 = 3;
+const uint8_t sampleFormatU32 = 4;
+const uint8_t sampleFormatS32 = 5;
+
+#define OPUS_FMT 8
+#define AUDIO_PROFILES_SZ 7
+int audioProfNum = 1;
+
+typedef struct {
+  char *description;
+  uint8_t nChannels;
+  uint16_t bitsPerSample;
+  uint8_t sampleFormat;
+} aProfiles;
+
+aProfiles audioProfile[AUDIO_PROFILES_SZ] = {{"PCM 11025Hz 16-bit stereo", 2, 11025, sampleFormatU16},
+                            {"PCM 22050Hz 16-bit stereo", 2, 22050, sampleFormatU16},
+                            {"PCM 44100Hz 16-bit stereo", 2, 44100, sampleFormatU16},
+                            {"OPUS 22050Hz 16-bit stereo", 2, 22050, sampleFormatU16 | OPUS_FMT},
+                            {"OPUS 32000Hz 16-bit stereo", 2, 22050, sampleFormatU16 | OPUS_FMT},
+                            {"OPUS 44100Hz 16-bit stereo", 2, 44100, sampleFormatU16 | OPUS_FMT},
+                            {"OPUS 48000Hz 16-bit stereo", 2, 48000, sampleFormatU16 | OPUS_FMT}
+                            };

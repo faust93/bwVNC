@@ -24,13 +24,18 @@ char *humanSize(uint64_t bytes, char *hrbytes)
 
 static void config_window(mu_Context *ctx)
 {
-	if (mu_begin_window_ex(ctx, "bwVNC", mu_rect((cl->width-300)/2, 0, 300, 240), MU_OPT_NOCLOSE)) {
+	if (mu_begin_window_ex(ctx, "bwVNC", mu_rect((cl->width-320)/2, 0, 320, 240), MU_OPT_NOCLOSE)) {
 		//mu_Container *cnt = mu_get_current_container(ctx);
 		//cnt->rect.x = mouse_x;
 		//cnt->rect.y = mouse_y;
 		if (mu_header_ex(ctx, "Configuration", MU_OPT_EXPANDED)) {
 			mu_layout_row(ctx, 1, (int[]) { -1 }, 0);
-			mu_checkbox(ctx, "Relative mouse mode", &mouse_relmode);
+			if(mu_checkbox(ctx, "Game mode", &game_relmode)){
+				if(game_relmode)
+					SDL_StopTextInput();
+				else
+					SDL_StartTextInput();
+			}
 			if(mu_checkbox(ctx, "Audio enabled", &isAudioEnabled)){
 				cl->audioEnable = isAudioEnabled;
 				SendQemuAudioOnOff(cl, isAudioEnabled ? 0 : 1);
@@ -41,6 +46,8 @@ static void config_window(mu_Context *ctx)
 			char buf[BUFSIZ];
 			if (mu_begin_treenode(ctx, "Client stats")) {
 				mu_layout_row(ctx, 2, (int[]) { 118, -1 }, 0);
+				mu_label(ctx, "Audio encoder");
+				mu_label(ctx, isAudioEnabled ? audioProfile[audioProfNum].description : "No audio");
 				mu_label(ctx, "Audio bytes received");
 				mu_label(ctx, humanSize(cl->clientStats.audioBytesRx, buf));
 				mu_label(ctx, "Audio pending buffer");
@@ -83,9 +90,9 @@ void ui_ev_callback(mu_Context *ctx, SDL_Event *e){
 	switch(e->type) {
 		case SDL_KEYUP:
 		case SDL_KEYDOWN:
-		if(e->key.keysym.sym == SDLK_F12 && e->type == SDL_KEYDOWN) {
+		if((e->key.keysym.sym == SDLK_F12 || e->key.keysym.sym == SDLK_ESCAPE) && e->type == SDL_KEYDOWN) {
 			if(ui_show) {
-				if(mouse_relmode)
+				if(game_relmode)
 					SDL_SetRelativeMouseMode(SDL_TRUE);
 				ui_show = FALSE;
 			}
@@ -239,9 +246,12 @@ static rfbKeySym SDL_key2rfbKeySym(SDL_KeyboardEvent* e) {
 	case SDLK_HELP: k = XK_Help; break;
 	case SDLK_PRINTSCREEN: k = XK_Print; break;
 	case SDLK_SYSREQ: k = XK_Sys_Req; break;
-	default:
-		if (e->keysym.mod & KMOD_SHIFT) sym = ucsToUpper(sym);
-		k = ucs2keysym(sym);
+	default: 
+		if(game_relmode) {
+			if (e->keysym.mod & KMOD_SHIFT) sym = ucsToUpper(sym);
+			k = ucs2keysym(sym);
+		}
+		break;
 	}
 
 	/* SDL_TEXTINPUT does not generate characters if ctrl is down, so handle those here */
@@ -426,7 +436,7 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 			break;
 
 		if (e->type == SDL_MOUSEMOTION) {
-			if(mouse_relmode){
+			if(game_relmode){
 				mouse_x = 0x7FFF + e->motion.xrel;
 				mouse_y = 0x7FFF + e->motion.yrel;
 			} else {
@@ -436,7 +446,7 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 			state = e->motion.state;
 		}
 		else {
-			if(!mouse_relmode) {
+			if(!game_relmode) {
 				mouse_x = e->button.x;
 				mouse_y = e->button.y;
 			}
@@ -455,6 +465,13 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 		buttonMask &= ~(rfbButton4Mask | rfbButton5Mask);
 		break;
 	}
+	case SDL_TEXTINPUT:
+		if (viewOnly || game_relmode)
+			break;
+		rfbKeySym sym = ucs2keysym(utf8char2rfbKeySym(e->text.text));
+		SendKeyEvent(cl, sym, TRUE);
+		SendKeyEvent(cl, sym, FALSE);
+		break;
 	case SDL_KEYUP:
 	case SDL_KEYDOWN:
 		if (viewOnly)
@@ -462,7 +479,7 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 		if(e->key.keysym.sym == SDLK_F12 && e->type == SDL_KEYDOWN) {
 			if(!ui_show) {
 				ui_show = TRUE;
-				if(mouse_relmode)
+				if(game_relmode)
 					SDL_SetRelativeMouseMode(SDL_FALSE);
 			}
 			break;
@@ -551,6 +568,9 @@ void usage(char *name) {
  	fprintf (stderr,"  -showdrivers          Show available SDL rendering drivers\n");
   	fprintf (stderr,"  -sdldriver [s]        Use [s] SDL render driver (default: %s)\n", DEFAULT_RENDER_B);
 	fprintf (stderr,"  -noaudio              Disable audio support (default: enabled)\n");
+	fprintf (stderr,"  -audio-profile [n]    Specify audio profile to use: (default: %d)\n", audioProfNum);
+	for(int i = 0; i!=AUDIO_PROFILES_SZ; i++)
+		fprintf (stderr,"                        %d: %s\n", i, audioProfile[i].description);
 	fprintf (stderr,"  -resizable [s]        Enable desktop window resizing (default: %s)\n", enableResizable ? "on" : "off");
 	fprintf (stderr,"  -resize-method [s]    Resizing method to use: zoom, desktop (default: desktop)\n");
 	fprintf (stderr,"                        'desktop' - change desktop resolution on the server side\n");
@@ -579,6 +599,8 @@ int main(int argc,char** argv) {
 			viewOnly = 1;
 		else if (!strcmp(argv[i], "-noaudio"))
 			isAudioEnabled = FALSE;
+		else if (!strcmp(argv[i], "-audio-profile"))
+			audioProfNum = atoi(argv[i+1]);
 		else if (!strcmp(argv[i], "-no-logs"))
 			logging_enabled = FALSE;
 		else if (!strcmp(argv[i], "-resizable")) {
@@ -607,8 +629,6 @@ int main(int argc,char** argv) {
 	SDL_Init(SDL_INIT_VIDEO);
 	atexit(SDL_Quit);
 	signal(SIGINT, exit);
-
-	SDL_StopTextInput();
 
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, SDLrenderDriver ? SDLrenderDriver : DEFAULT_RENDER_B);
 	rfbClientLog("SDL Rendering Driver: %s\n", SDLrenderDriver ? SDLrenderDriver : DEFAULT_RENDER_B);
@@ -642,9 +662,10 @@ int main(int argc,char** argv) {
 	  cl->listen6Port = LISTEN_PORT_OFFSET;
 
 	  cl->audioEnable = isAudioEnabled;
-	  cl->sampleFormat = 2;
-	  cl->channels = 2;
-	  cl->frequency = 22050;
+	  cl->sampleFormat = audioProfile[audioProfNum].sampleFormat;
+	  cl->channels = audioProfile[audioProfNum].nChannels;
+	  cl->frequency = audioProfile[audioProfNum].bitsPerSample;
+	  rfbClientLog("Using Audio Profile: %s\n", isAudioEnabled ? audioProfile[audioProfNum].description : "No audio");
 
 	  SDL_GL_SetSwapInterval(-1);
 
@@ -663,7 +684,7 @@ int main(int argc,char** argv) {
 			} else if(!handleSDLEvent(cl, &e))
 					break;
 	    } else {
-			i=WaitForMessage(cl,500);
+			i=WaitForMessage(cl,150);
 			if(i<0)
 			{
 		  		cleanup(cl);

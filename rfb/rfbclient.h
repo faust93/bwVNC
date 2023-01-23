@@ -240,10 +240,10 @@ typedef char* (*GetSASLMechanismProc)(struct _rfbClient* client, char* mechlist)
 
 /* client side stats */
 typedef struct rfbClientStats {
-    uint32_t audioBytesRx;
+	uint32_t audioBytesRx;
 	uint32_t audioPendingBytes; /* bytes pending to be sent to audio hw */
 	uint32_t audioPendingMs;
-    uint32_t h264BytesRx;
+	uint32_t h264BytesRx;
 	uint32_t h264FramesRx;
 } rfbClientStats;
 
