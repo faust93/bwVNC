@@ -11,7 +11,7 @@ char *humanSize(uint64_t bytes, char *hrbytes)
 {
     char   *suffix[] = { "B", "KB", "MB", "GB", "TB" };
     char    length = sizeof(suffix) / sizeof(suffix[0]);
-    int     i;
+    int     i = 0;
 	double dblBytes = bytes;
 
 	if (bytes > 1024) {
@@ -29,7 +29,7 @@ static void config_window(mu_Context *ctx)
 		//cnt->rect.x = mouse_x;
 		//cnt->rect.y = mouse_y;
 		if (mu_header_ex(ctx, "Configuration", MU_OPT_EXPANDED)) {
-			mu_layout_row(ctx, 1, (int[]) { -1 }, 0);
+			mu_layout_row(ctx, 2, (int[]) { 150, -1 }, 0);
 			if(mu_checkbox(ctx, "Game mode", &game_relmode)){
 				if(game_relmode)
 					SDL_StopTextInput();
@@ -41,6 +41,12 @@ static void config_window(mu_Context *ctx)
 				SendQemuAudioOnOff(cl, isAudioEnabled ? 0 : 1);
 			}
 			mu_checkbox(ctx, "Zoom resize mode", &resizeMethod);
+			if(mu_checkbox(ctx, "Fullscreen mode", &fullScreenMode)){
+				if(fullScreenMode)
+					SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+				else
+					SDL_SetWindowFullscreen(sdlWindow, 0);
+			}
 		}
 		if (mu_header(ctx, "Connection Info")) {
 			char buf[BUFSIZ];

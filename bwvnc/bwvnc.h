@@ -31,7 +31,7 @@ char *SDLrenderDriver = NULL;
 int mouse_x, mouse_y;
 /* switch to relative mouse mode & restricted keyboard input (textmode disabled) */
 int game_relmode = FALSE;
-
+int fullScreenMode = FALSE;
 int isAudioEnabled = TRUE;
 
 /* ui data */
