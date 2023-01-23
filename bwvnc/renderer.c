@@ -2,6 +2,8 @@
 #include "renderer.h"
 #include "atlas.inl"
 
+ui_event_callback r_ui_event_callback = NULL;
+
 static SDL_Window  * window;
 static SDL_Renderer* renderer;
 static SDL_Texture * ui_font;

@@ -4,7 +4,7 @@
 #include "microui.h"
 #include <SDL2/SDL.h>
 
-void (*r_ui_event_callback)(mu_Context *ctx, SDL_Event *e);
+typedef void (*ui_event_callback)(mu_Context *ctx, SDL_Event *e);
 
 void r_init(SDL_Window * sdlwin, SDL_Renderer* sdlrend);
 void r_clean(void);

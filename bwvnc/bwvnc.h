@@ -1,6 +1,7 @@
 #include <SDL.h>
 #include <rfb/rfbclient.h>
 #include "microui.h"
+#include "renderer.h"
 
 #define RESIZE_DESKTOP 0
 #define RESIZE_ZOOM 1
@@ -37,6 +38,8 @@ int isAudioEnabled = TRUE;
 mu_Context *ctx;
 int ui_inited = FALSE;
 int ui_show = FALSE;
+
+extern ui_event_callback r_ui_event_callback;
 
 struct { int sdl; int rfb; } buttonMapping[]={
 	{1, rfbButton1Mask},
