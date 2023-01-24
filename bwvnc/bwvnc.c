@@ -6,6 +6,8 @@
 #include "microui.h"
 #include "renderer.h"
 
+static rfbBool resize(rfbClient* client);
+
 /* UI start */
 char *humanSize(uint64_t bytes, char *hrbytes)
 {
@@ -42,10 +44,18 @@ static void config_window(mu_Context *ctx)
 			}
 			mu_checkbox(ctx, "Zoom resize mode", &resizeMethod);
 			if(mu_checkbox(ctx, "Fullscreen mode", &fullScreenMode)){
-				if(fullScreenMode)
+				ui_show = FALSE;
+				if(fullScreenMode) {
 					SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
-				else
+					if(resizeMethod == RESIZE_DESKTOP) {
+						SDL_Rect rt;
+						int idx = SDL_GetWindowDisplayIndex(sdlWindow);
+						SDL_GetDisplayBounds(idx, &rt);
+						SendExtDesktopSize(cl, rt.w, rt.h);
+					}
+				} else {
 					SDL_SetWindowFullscreen(sdlWindow, 0);
+				}
 			}
 		}
 		if (mu_header(ctx, "Connection Info")) {
