@@ -26,6 +26,8 @@ char *humanSize(uint64_t bytes, char *hrbytes)
 
 static void config_window(mu_Context *ctx)
 {
+	char buf[BUFSIZ];
+	char buf1[BUFSIZ];
 	if (mu_begin_window_ex(ctx, "bwVNC", mu_rect((cl->width-320)/2, 0, 320, 240), MU_OPT_NOCLOSE)) {
 		//mu_Container *cnt = mu_get_current_container(ctx);
 		//cnt->rect.x = mouse_x;
@@ -57,9 +59,26 @@ static void config_window(mu_Context *ctx)
 					SDL_SetWindowFullscreen(sdlWindow, 0);
 				}
 			}
+			mu_label(ctx, "Compression (0=fast,9=best)");
+			sprintf(buf,"%d", cl->appData.compressLevel);
+			if(mu_textbox(ctx, buf, 4)){
+				int clvl = atoi(buf+1);
+				if(clvl <= 9 && clvl >= 0 && clvl != cl->appData.compressLevel){
+					cl->appData.compressLevel = clvl;
+					SetFormatAndEncodings(cl);
+				}
+			}
+			mu_label(ctx, "JPEG Quality (0=poor,9=best)");
+			sprintf(buf1,"%d", cl->appData.qualityLevel);
+			if(mu_textbox(ctx, buf1, 4)){
+				int clvl = atoi(buf1+1);
+				if(clvl <= 9 && clvl >= 0 && clvl != cl->appData.qualityLevel){
+					cl->appData.qualityLevel = clvl;
+					SetFormatAndEncodings(cl);
+				}
+			}
 		}
 		if (mu_header(ctx, "Connection Info")) {
-			char buf[BUFSIZ];
 			if (mu_begin_treenode(ctx, "Client stats")) {
 				mu_layout_row(ctx, 2, (int[]) { 118, -1 }, 0);
 				mu_label(ctx, "Audio encoder");
@@ -294,7 +313,7 @@ static void update(rfbClient* cl,int x,int y,int w,int h) {
 	SDL_Surface *sdl = rfbClientGetClientData(cl, SDL_Init);
 	/* update texture from surface->pixels */
 	SDL_Rect r = {x,y,w,h};
- 	if(SDL_UpdateTexture(sdlTexture, &r, sdl->pixels + y*sdl->pitch + x*4, sdl->pitch) < 0)
+	if(SDL_UpdateTexture(sdlTexture, &r, sdl->pixels + y*sdl->pitch + x*4, sdl->pitch) < 0)
 		rfbClientErr("update: failed to update texture: %s\n", SDL_GetError());
 	/* copy texture to renderer and show */
 	if(SDL_RenderClear(sdlRenderer) < 0)
@@ -303,10 +322,8 @@ static void update(rfbClient* cl,int x,int y,int w,int h) {
 		rfbClientErr("update: failed to copy texture to renderer: %s\n", SDL_GetError());
 
 	/* UI show window */
-	if(ui_show){
-		ui_process_frame(ctx);
+	if(ui_show)
 		r_ui_draw(ctx);
-	}
 
 	SDL_RenderPresent(sdlRenderer);
 }
@@ -594,6 +611,9 @@ void usage(char *name) {
  	fprintf (stderr,"  -no-logs              Disable logging (default: %s)\n", logging_enabled ? "on" : "off");
 	fprintf (stderr," VNC options:\n");
     fprintf (stderr,"  -encodings [s]         VNC encoding to use: h264 tight zrle ultra copyrect hextile zlib corre rre raw (default: h264)\n");
+	fprintf (stderr,"  -compress [n]          Specify compression level: 0-fast, 9-best (default: 0)\n");
+	fprintf (stderr,"                         For H264 encoder it means preconfigured encoding profile num, from 0 to 9\n");
+	fprintf (stderr,"  -quality [n]           Specify JPEG quality level: 0-poor, 9-best (default: 5)\n");
     exit(1);
 }
 
@@ -713,8 +733,9 @@ int main(int argc,char** argv) {
 		    	break;
 		  	}
 			if(ui_show) {
+				ui_process_frame(ctx);
 				update(cl,0,0,cl->width,cl->height);
-				SDL_Delay(4);
+				SDL_Delay(2);
 			}
 	    }
 	  }

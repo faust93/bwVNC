@@ -235,7 +235,7 @@ static void initAppData(AppData* data) {
 	data->forceOwnCmap=FALSE;
 	data->forceTrueColour=FALSE;
 	data->requestedDepth=0;
-	data->compressLevel=3;
+	data->compressLevel=0;
 	data->qualityLevel=5;
 #ifdef LIBVNCSERVER_HAVE_LIBJPEG
 	data->enableJPEG=TRUE;
