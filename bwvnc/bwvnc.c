@@ -8,6 +8,8 @@
 
 static rfbBool resize(rfbClient* client);
 
+static int ui_delay;
+
 /* UI start */
 char *humanSize(uint64_t bytes, char *hrbytes)
 {
@@ -48,6 +50,8 @@ static void config_window(mu_Context *ctx)
 			if(mu_checkbox(ctx, "Fullscreen mode", &fullScreenMode)){
 				ui_show = FALSE;
 				if(fullScreenMode) {
+					if(game_relmode)
+						SDL_SetRelativeMouseMode(SDL_TRUE);
 					SDL_SetWindowFullscreen(sdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
 					if(resizeMethod == RESIZE_DESKTOP) {
 						SDL_Rect rt;
@@ -719,7 +723,7 @@ int main(int argc,char** argv) {
 					break;
 			} else if(!handleSDLEvent(cl, &e))
 					break;
-	    } else {
+		} else {
 			i=WaitForMessage(cl,150);
 			if(i<0)
 			{
@@ -734,10 +738,13 @@ int main(int argc,char** argv) {
 		  	}
 			if(ui_show) {
 				ui_process_frame(ctx);
-				update(cl,0,0,cl->width,cl->height);
-				SDL_Delay(2);
+				ui_delay++;
+				if(!i && ui_delay > 120) {
+					ui_delay = 0;
+					update(cl,0,0,cl->width,cl->height);
+				}
 			}
-	    }
+		}
 	  }
 	}
 	while(listenLoop);
