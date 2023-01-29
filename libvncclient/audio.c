@@ -47,7 +47,7 @@ uint32_t       extraDelayInMillisec;
 
 /* opus stuff */
 #define OPUS_FMT 8
-#define OPUS_MAX_FRAME_SIZE 480
+#define OPUS_MAX_FRAME_SIZE 960
 
 OpusDecoder    *opusDecoder = NULL;
 uint8_t        opusEnabled = FALSE;
