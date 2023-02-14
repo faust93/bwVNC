@@ -59,6 +59,8 @@ static void config_window(mu_Context *ctx)
 					}
 				} else {
 					SDL_SetWindowFullscreen(sdlWindow, 0);
+					if(game_relmode)
+					    SDL_SetRelativeMouseMode(SDL_TRUE);
 				}
 			}
 			mu_label(ctx, "Compression (0=fast,9=best)");
