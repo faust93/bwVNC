@@ -418,7 +418,8 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 				if (SDL_HasClipboardText()) {
 					char *text = SDL_GetClipboardText();
 					if(text) {
-						SendClientCutText(cl, text, strlen(text));
+						if(!SendClientCutTextUTF8(cl, text, strlen(text)))
+						    SendClientCutText(cl, text, strlen(text));
 					}
 				}
 				break;
@@ -544,10 +545,16 @@ static rfbBool handleSDLEvent(rfbClient *cl, SDL_Event *e)
 	return TRUE;
 }
 
-static void got_selection(rfbClient *cl, const char *text, int len)
+static void got_selection_latin1(rfbClient *cl, const char *text, int len)
 {
         if(SDL_SetClipboardText(text) != 0)
-	    rfbClientErr("could not set received clipboard text: %s\n", SDL_GetError());
+	    rfbClientErr("could not set received latin1 clipboard text: %s\n", SDL_GetError());
+}
+
+static void got_selection_utf8(rfbClient *cl, const char *buf, int len)
+{
+	if(SDL_SetClipboardText(buf) != 0)
+	    rfbClientErr("could not set received utf8 clipboard text: %s\n", SDL_GetError());
 }
 
 static rfbCredential* get_credential(rfbClient* cl, int credentialType){
@@ -696,7 +703,8 @@ int main(int argc,char** argv) {
 	  cl->GotFrameBufferUpdate=update;
 	  cl->HandleKeyboardLedState=kbd_leds;
 	  cl->HandleTextChat=text_chat;
-	  cl->GotXCutText = got_selection;
+	  cl->GotXCutText = got_selection_latin1;
+	  cl->GotXCutTextUTF8 = got_selection_utf8;
 	  cl->GetCredential = get_credential;
 	  cl->listenPort = LISTEN_PORT_OFFSET;
 	  cl->listen6Port = LISTEN_PORT_OFFSET;
