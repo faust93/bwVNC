@@ -1461,9 +1461,9 @@ SetFormatAndEncodings(rfbClient* client)
     encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingQemuAudio);
 
 #ifdef LIBVNCSERVER_HAVE_LIBZ
-  /* extendedclipboard */
-  if (se->nEncodings < MAX_ENCODINGS)
-    encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingExtendedClipboard);
+  if(client->GotXCutTextUTF8)
+    if (se->nEncodings < MAX_ENCODINGS)
+       encs[se->nEncodings++] = rfbClientSwap32IfLE(rfbEncodingExtendedClipboard);
 #endif
 
   /* client extensions */
