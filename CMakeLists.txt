@@ -318,7 +318,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rfb/rfbconfig.h.cmakein ${CMAKE_CURRE
 set(LIBVNCCLIENT_SOURCES
     ${LIBVNCCLIENT_DIR}/cursor.c
     ${LIBVNCCLIENT_DIR}/listen.c
-    ${LIBVNCCLIENT_DIR}/rfbproto.c
+    ${LIBVNCCLIENT_DIR}/rfbclient.c
     ${LIBVNCCLIENT_DIR}/sockets.c
     ${LIBVNCCLIENT_DIR}/vncviewer.c
     ${COMMON_DIR}/sockets.c
